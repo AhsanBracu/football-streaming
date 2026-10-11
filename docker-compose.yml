@@ -1,0 +1,38 @@
+# Part 2: HDFS only. Later parts add Kafka, Spark, MongoDB and the dashboard here.
+#
+#   docker compose up -d        # start
+#   docker compose ps           # check status
+#   docker compose down         # stop and remove
+
+# Settings shared by both HDFS containers. The apache/hadoop image turns
+# variables like "CORE-SITE.XML_fs.defaultFS" into Hadoop's XML config files.
+x-hadoop-env: &hadoop-env
+  CORE-SITE.XML_fs.defaultFS: hdfs://namenode:8020          # address of HDFS
+  HDFS-SITE.XML_dfs.namenode.rpc-address: namenode:8020
+  HDFS-SITE.XML_dfs.replication: "1"                        # only one DataNode, so keep one copy
+  HDFS-SITE.XML_dfs.webhdfs.enabled: "true"                 # HTTP access (the producer uses this later)
+
+services:
+  # NameNode: the "index" of HDFS. It knows which files exist and where their blocks are.
+  namenode:
+    image: apache/hadoop:3.3.6
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    environment:
+      <<: *hadoop-env
+      ENSURE_NAMENODE_DIR: /tmp/hadoop-hadoop/dfs/name     # format HDFS on first start
+    ports:
+      - "9870:9870"   # web UI: http://localhost:9870
+    volumes:
+      # your laptop's data/ folder, visible inside the container as /input (read-only).
+      # Not /data: the hadoop image tries to chmod /data on startup, which fails on a read-only mount.
+      - ./data:/input:ro
+
+  # DataNode: stores the actual file contents (blocks).
+  datanode:
+    image: apache/hadoop:3.3.6
+    hostname: datanode
+    command: ["hdfs", "datanode"]
+    environment: *hadoop-env
+    depends_on:
+      - namenode

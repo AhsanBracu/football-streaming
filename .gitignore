@@ -1,0 +1,21 @@
+# Downloaded data: anyone can recreate it with scripts/download_statsbomb.py
+data/
+
+# Python leftovers (created automatically when Python runs your scripts)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets: passwords and API keys (we'll likely use a .env file in later parts)
+.env
+
+# Editor and Mac files
+.vscode/
+.idea/
+.DS_Store
+
+# Spark / Jupyter output (for later parts)
+.ipynb_checkpoints/
+spark-warehouse/
+checkpoint/

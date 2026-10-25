@@ -1,4 +1,4 @@
-# Part 2: HDFS. Part 3: Kafka + Kafka UI. Later parts add Spark, MongoDB and the dashboard here.
+# Part 2: HDFS. Part 3: Kafka + Kafka UI. Part 4: producer. Later parts add Spark, MongoDB and the dashboard here.
 #
 #   docker compose up -d        # start
 #   docker compose ps           # check status
@@ -80,6 +80,18 @@ services:
     ports:
       - "8080:8080"
     depends_on:
+      - kafka
+
+  # Producer: replays the matches from HDFS into Kafka (code in producer/).
+  # The "producer" profile keeps "docker compose up -d" from starting it;
+  # run it when you want a replay:
+  #   docker compose run --rm producer --speed 30
+  producer:
+    build: ./producer
+    profiles: ["producer"]
+    depends_on:
+      - namenode
+      - datanode
       - kafka
 
 volumes:

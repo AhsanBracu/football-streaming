@@ -1,4 +1,4 @@
-# Part 2: HDFS. Part 3: Kafka + Kafka UI. Part 4: producer. Later parts add Spark, MongoDB and the dashboard here.
+# Part 2: HDFS. Part 3: Kafka + Kafka UI. Part 4: producer. Part 5: Spark. Later parts add MongoDB and the dashboard here.
 #
 #   docker compose up -d        # start
 #   docker compose ps           # check status
@@ -93,6 +93,32 @@ services:
       - namenode
       - datanode
       - kafka
+
+  # Spark in standalone mode: one master that hands out work, one worker that does it.
+  # Spark 3.5 (Scala 2.12): the Kafka and MongoDB connectors are added later with
+  # --packages and their versions must match this.
+  spark-master:
+    image: apache/spark:3.5.3
+    hostname: spark-master
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    ports:
+      - "8081:8080"   # master web UI: http://localhost:8081 (8080 is Kafka UI)
+    volumes:
+      # our job code; spark-submit runs here (scripts/run_spark_job.sh)
+      - ./spark:/opt/spark-apps:ro
+
+  spark-worker:
+    image: apache/spark:3.5.3
+    hostname: spark-worker
+    command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker",
+              "spark://spark-master:7077"]                 # register with the master
+    environment:
+      SPARK_WORKER_CORES: 2       # run at most 2 tasks at the same time
+      SPARK_WORKER_MEMORY: 2g     # memory the worker can give to jobs
+    ports:
+      - "8082:8081"   # worker web UI: http://localhost:8082
+    depends_on:
+      - spark-master
 
 volumes:
   kafka-data:

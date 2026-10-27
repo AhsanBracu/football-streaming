@@ -1,6 +1,7 @@
 """Spark Structured Streaming job: read football events from Kafka and process them live.
 
-Step 5b: read the topic, parse the JSON and print each event to the console.
+Reads the topic, parses the JSON, and computes team stats per sliding window of
+match time (shots, shots on target, goals, xG, pressures, passes), printed to the console.
 Run it with scripts/run_spark_job.sh, then start the producer.
 """
 from pyspark.sql import SparkSession
@@ -11,10 +12,23 @@ from pyspark.sql.types import (DoubleType, IntegerType, LongType, StringType,
 KAFKA_BOOTSTRAP = "kafka:9092"
 TOPIC = "football-events"
 
+# All in match time (event_time), not wall-clock time.
+WINDOW_LENGTH = "5 minutes"   # each window covers 5 minutes of the match
+WINDOW_SLIDE = "1 minute"     # a new window starts every minute
+WATERMARK = "1 minute"        # how late an event may arrive and still be counted
+
+# StatsBomb shot outcomes that count as "on target".
+ON_TARGET = ["Goal", "Saved", "Saved to Post"]
+
 
 def named(field):
     """StatsBomb stores things like type and team as {"id": ..., "name": ...}; we only need the name."""
     return StructField(field, StructType([StructField("name", StringType())]))
+
+
+def is_(condition):
+    """1 if the condition is true, else 0 (also 0 when the field is missing)."""
+    return F.when(condition, 1).otherwise(0)
 
 
 # The shape of one Kafka message (see producer/replay.py). Only the fields we
@@ -37,7 +51,12 @@ MESSAGE_SCHEMA = StructType([
 
 
 def main():
-    spark = SparkSession.builder.appName("football-streaming").getOrCreate()
+    spark = (SparkSession.builder
+             .appName("football-streaming")
+             # groupBy reshuffles the data into this many pieces; Spark's default
+             # of 200 makes 200 tiny tasks per batch for our small stream.
+             .config("spark.sql.shuffle.partitions", 6)
+             .getOrCreate())
     spark.sparkContext.setLogLevel("WARN")  # hide Spark's INFO messages
 
     # 1. Read: an endless table with one row per Kafka message.
@@ -64,12 +83,40 @@ def main():
                   F.col("m.event.shot.outcome.name").alias("shot_outcome"),
               ))
 
-    # 3. Output: print each new batch of events to the terminal.
-    query = (events.writeStream
+    # 3. Flags: turn each event into numbers that can simply be added up.
+    flagged = events.where(F.col("team").isNotNull()).select(
+        "match_id", "event_time", "team",
+        is_(F.col("type") == "Shot").alias("is_shot"),
+        is_(F.col("shot_outcome").isin(*ON_TARGET)).alias("is_on_target"),
+        is_(F.col("shot_outcome") == "Goal").alias("is_goal"),
+        F.coalesce(F.col("xg"), F.lit(0.0)).alias("xg"),
+        is_(F.col("type") == "Pressure").alias("is_pressure"),
+        is_(F.col("type") == "Pass").alias("is_pass"),
+    )
+
+    # 4. Windows: add up the flags per match, team and sliding window.
+    #    The watermark lets Spark finish (and forget) a window once the match
+    #    clock is more than WATERMARK past its end.
+    stats = (flagged
+             .withWatermark("event_time", WATERMARK)
+             .groupBy("match_id", "team", F.window("event_time", WINDOW_LENGTH, WINDOW_SLIDE))
+             .agg(F.sum("is_shot").alias("shots"),
+                  F.sum("is_on_target").alias("on_target"),
+                  F.sum("is_goal").alias("goals"),
+                  F.round(F.sum("xg"), 2).alias("xg"),
+                  F.sum("is_pressure").alias("pressures"),
+                  F.sum("is_pass").alias("passes"))
+             .select("match_id",
+                     F.col("window.start").alias("window_start"),
+                     F.col("window.end").alias("window_end"),
+                     "team", "shots", "on_target", "goals", "xg", "pressures", "passes"))
+
+    # 5. Output: "update" prints only the windows whose numbers changed in this batch.
+    query = (stats.writeStream
              .format("console")
              .option("truncate", False)
-             .option("numRows", 20)
-             .outputMode("append")
+             .option("numRows", 50)
+             .outputMode("update")
              .start())
     query.awaitTermination()
 

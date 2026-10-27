@@ -11,11 +11,15 @@ x-hadoop-env: &hadoop-env
   HDFS-SITE.XML_dfs.namenode.rpc-address: namenode:8020
   HDFS-SITE.XML_dfs.replication: "1"                        # only one DataNode, so keep one copy
   HDFS-SITE.XML_dfs.webhdfs.enabled: "true"                 # HTTP access (the producer uses this later)
+  # Memory caps: Docker Desktop only has ~4 GB for all containers, and each Java
+  # program would otherwise take as much as it likes (Kafka got OOM-killed).
+  HADOOP_HEAPSIZE_MAX: 256m
 
 services:
   # NameNode: the "index" of HDFS. It knows which files exist and where their blocks are.
   namenode:
     image: apache/hadoop:3.3.6
+    platform: linux/amd64   # image is Intel-only; runs via emulation on Apple chips
     hostname: namenode
     command: ["hdfs", "namenode"]
     environment:
@@ -31,6 +35,7 @@ services:
   # DataNode: stores the actual file contents (blocks).
   datanode:
     image: apache/hadoop:3.3.6
+    platform: linux/amd64   # image is Intel-only; runs via emulation on Apple chips
     hostname: datanode
     command: ["hdfs", "datanode"]
     environment: *hadoop-env
@@ -42,7 +47,9 @@ services:
   kafka:
     image: apache/kafka:4.1.0
     hostname: kafka
+    restart: unless-stopped   # if it ever crashes, Docker starts it again (topics are on the volume)
     environment:
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m               # memory cap (default 1 GB)
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller           # this one node does both jobs
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
@@ -77,6 +84,7 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092    # internal listener: it runs in Docker
+      JAVA_OPTS: -Xmx192m                              # memory cap
     ports:
       - "8080:8080"
     depends_on:
@@ -101,6 +109,8 @@ services:
     image: apache/spark:3.5.3
     hostname: spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m   # the master process itself (default 1 GB)
     ports:
       - "8081:8080"   # master web UI: http://localhost:8081 (8080 is Kafka UI)
     volumes:
@@ -114,7 +124,8 @@ services:
               "spark://spark-master:7077"]                 # register with the master
     environment:
       SPARK_WORKER_CORES: 2       # run at most 2 tasks at the same time
-      SPARK_WORKER_MEMORY: 2g     # memory the worker can give to jobs
+      SPARK_WORKER_MEMORY: 1g     # memory the worker can give to jobs (executors)
+      SPARK_DAEMON_MEMORY: 256m   # the worker process itself (default 1 GB)
     ports:
       - "8082:8081"   # worker web UI: http://localhost:8082
     depends_on:

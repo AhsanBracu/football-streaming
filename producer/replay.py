@@ -130,8 +130,10 @@ def main():
         "linger.ms": 5,  # wait at most 5 ms to batch messages: good throughput, low latency
     })
 
-    # All matches kick off together, at the same event_time.
-    kickoff = datetime.now(timezone.utc)
+    # All matches kick off together, at the same event_time. Rounded down to a
+    # whole minute so Spark's windows (which start on whole minutes) line up
+    # with match minutes: window 21:03-21:08 = minutes 3-8.
+    kickoff = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     progress = {m: (0, 0, 0) for m in match_ids}
     threads = [threading.Thread(target=replay_match,
                                 args=(m, producer, args.speed, kickoff, progress))

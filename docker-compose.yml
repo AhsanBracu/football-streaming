@@ -1,8 +1,8 @@
-# Part 2: HDFS. Part 3: Kafka + Kafka UI. Part 4: producer. Part 5: Spark. Later parts add MongoDB and the dashboard here.
+# Part 2: HDFS. Part 3: Kafka + Kafka UI. Part 4: producer. Part 5: Spark. Part 6: MongoDB. Part 7 adds the dashboard here.
 #
 #   docker compose up -d        # start
 #   docker compose ps           # check status
-#   docker compose down         # stop and remove
+#   docker compose down         # stop and remove (data on volumes is kept; "down -v" deletes it)
 
 # Settings shared by both HDFS containers. The apache/hadoop image turns
 # variables like "CORE-SITE.XML_fs.defaultFS" into Hadoop's XML config files.
@@ -11,6 +11,10 @@ x-hadoop-env: &hadoop-env
   HDFS-SITE.XML_dfs.namenode.rpc-address: namenode:8020
   HDFS-SITE.XML_dfs.replication: "1"                        # only one DataNode, so keep one copy
   HDFS-SITE.XML_dfs.webhdfs.enabled: "true"                 # HTTP access (the producer uses this later)
+  # Where HDFS keeps its files: on Docker volumes mounted at /data (below), so
+  # they survive when a container is recreated. The image makes /data writable at startup.
+  HDFS-SITE.XML_dfs.namenode.name.dir: /data/dfs/name       # the index (namenode)
+  HDFS-SITE.XML_dfs.datanode.data.dir: /data/dfs/data       # the blocks (datanode)
   # Memory caps: Docker Desktop only has ~4 GB for all containers, and each Java
   # program would otherwise take as much as it likes (Kafka got OOM-killed).
   HADOOP_HEAPSIZE_MAX: 256m
@@ -24,12 +28,14 @@ services:
     command: ["hdfs", "namenode"]
     environment:
       <<: *hadoop-env
-      ENSURE_NAMENODE_DIR: /tmp/hadoop-hadoop/dfs/name     # format HDFS on first start
+      # Format HDFS only if this folder doesn't exist yet (first start on an empty volume).
+      ENSURE_NAMENODE_DIR: /data/dfs/name
     ports:
       - "9870:9870"   # web UI: http://localhost:9870
     volumes:
+      - hdfs-name:/data       # the HDFS index survives a recreate
       # your laptop's data/ folder, visible inside the container as /input (read-only).
-      # Not /data: the hadoop image tries to chmod /data on startup, which fails on a read-only mount.
+      # Not /data: the hadoop image chmods /data on startup, which fails on a read-only mount.
       - ./data:/input:ro
 
   # DataNode: stores the actual file contents (blocks).
@@ -39,6 +45,8 @@ services:
     hostname: datanode
     command: ["hdfs", "datanode"]
     environment: *hadoop-env
+    volumes:
+      - hdfs-data:/data       # the file blocks survive a recreate (needs hdfs-name too: same cluster ID)
     depends_on:
       - namenode
 
@@ -131,5 +139,30 @@ services:
     depends_on:
       - spark-master
 
+  # MongoDB: stores Spark's window stats for the dashboard.
+  # Runs as a replica set with one member ("rs0"): only replica sets have an
+  # oplog, and the dashboard's Change Streams read it to get changes pushed live.
+  mongodb:
+    image: mongo:7.0
+    hostname: mongodb
+    command: ["--replSet", "rs0", "--bind_ip_all",
+              "--wiredTigerCacheSizeGB", "0.25"]           # memory cap for the data cache (default ~50% of RAM)
+    ports:
+      - "27018:27017" # for mongosh / Compass on your Mac: mongodb://localhost:27018/?directConnection=true (27017 is taken by Homebrew mongod)
+    volumes:
+      - mongo-data:/data/db
+    # The replica set has to be set up once ("rs.initiate"). The healthcheck does
+    # it on the first start, and after that reports healthy once this node is PRIMARY.
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval",
+             "try { rs.status() } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongodb:27017'}]}) }; quit(db.hello().isWritablePrimary ? 0 : 1)"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
 volumes:
   kafka-data:
+  mongo-data:
+  hdfs-name:
+  hdfs-data:

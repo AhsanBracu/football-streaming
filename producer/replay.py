@@ -107,6 +107,7 @@ def replay_match(match_id, producer, speed, kickoff, progress):
                           .isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             "match_minute": event["minute"],              # for display
             "sent_at": int(time.time() * 1000),           # for measuring latency
+            "kickoff": kickoff.isoformat().replace("+00:00", "Z"),  # lets Spark turn windows into match minutes
             "event": event,                               # the original, unchanged
         }
         send(producer, str(match_id), json.dumps(message))

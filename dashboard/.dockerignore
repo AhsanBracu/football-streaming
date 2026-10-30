@@ -1,0 +1,3 @@
+# Installed inside the image by npm ci; the Mac's copies are not sent to Docker.
+**/node_modules
+client/dist

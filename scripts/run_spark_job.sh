@@ -10,6 +10,12 @@ cd "$(dirname "$0")/.."
 CHECKPOINT=/checkpoints/window-stats
 hdfs() { docker compose exec -T namenode hdfs dfs "$@"; }
 
+echo "Waiting for HDFS to be ready..."
+# Retry: right after "docker compose up" the namenode isn't listening yet,
+# and "safemode wait" fails immediately instead of waiting. Until safe mode is
+# off, HDFS is read-only, so deleting/creating the checkpoint would fail.
+until docker compose exec -T namenode hdfs dfsadmin -safemode wait >/dev/null 2>&1; do sleep 2; done
+
 if [[ "${1:-}" == "--reset" ]]; then
   echo "Deleting checkpoint $CHECKPOINT"
   hdfs -rm -r -f "$CHECKPOINT"

@@ -1,0 +1,7 @@
+match_id,team,opponent,passes,pressures,pressed_more_pct,peak_pressures,peak_minute,shots,xg,goals
+3857271,England,Iran,846,101,28,12,100-105,13,1.99,6
+3857271,Iran,England,247,141,59,16,98-103,8,1.45,2
+3857276,Canada,Morocco,562,135,37,14,35-40,5,1.1,0
+3857276,Morocco,Canada,393,154,55,19,2-7,7,0.41,2
+3857296,Belgium,Croatia,630,119,27,16,76-81,16,2.39,0
+3857296,Croatia,Belgium,609,164,66,16,20-25,11,0.68,0

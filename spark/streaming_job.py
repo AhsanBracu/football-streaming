@@ -22,7 +22,13 @@ CHECKPOINT = "hdfs://namenode:8020/checkpoints/window-stats"
 # All in match time (event_time), not wall-clock time.
 WINDOW_LENGTH = "5 minutes"   # each window covers 5 minutes of the match
 WINDOW_SLIDE = "1 minute"     # a new window starts every minute
-WATERMARK = "1 minute"        # how late an event may arrive and still be counted
+# How far (in match time) an event may be behind the newest one and still count.
+# Not 1 minute: a replay at speed > 1 runs its match clock up to a whole match
+# ahead of the real clock, so the next replay (starting at "now") would be
+# behind the watermark and dropped. 2 hours > the longest match (99 min).
+# In "update" mode this doesn't delay output; it only keeps finished windows
+# in state longer before they are removed.
+WATERMARK = "2 hours"
 
 # StatsBomb shot outcomes that count as "on target".
 ON_TARGET = ["Goal", "Saved", "Saved to Post"]
@@ -125,23 +131,25 @@ def main():
         is_(F.col("type") == "Pass").alias("is_pass"),
     )
 
-    # 4. Windows: add up the flags per match, team and sliding window.
+    # 4. Windows: add up the flags per replay, team and sliding window.
+    #    kickoff identifies the replay: two replays of the same match overlap in
+    #    event time, and without it their events would land in the same windows.
     #    The watermark lets Spark finish (and forget) a window once the match
     #    clock is more than WATERMARK past its end.
     stats = (flagged
              .withWatermark("event_time", WATERMARK)
-             .groupBy("match_id", "team", F.window("event_time", WINDOW_LENGTH, WINDOW_SLIDE))
+             .groupBy("match_id", "kickoff", "team", F.window("event_time", WINDOW_LENGTH, WINDOW_SLIDE))
              .agg(F.sum("is_shot").alias("shots"),
                   F.sum("is_on_target").alias("on_target"),
                   F.sum("is_goal").alias("goals"),
                   F.round(F.sum("xg"), 2).alias("xg"),
                   F.sum("is_pressure").alias("pressures"),
                   F.sum("is_pass").alias("passes"),
-                  F.max("kickoff").alias("kickoff"),            # the same for every event of a replay
                   F.max("sent_at").alias("last_sent_at"))       # newest event in this window
              .select(
-                 # One document per match + team + window: the key for the upsert.
-                 F.concat_ws("|", "match_id", "team",
+                 # One document per replay + team + window: the key for the upsert.
+                 F.concat_ws("|", "match_id",
+                             F.date_format("kickoff", "yyyy-MM-dd'T'HH:mm"), "team",
                              F.date_format("window.start", "yyyy-MM-dd'T'HH:mm:ss")).alias("_id"),
                  "match_id", "team",
                  F.col("window.start").alias("window_start"),

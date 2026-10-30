@@ -161,6 +161,22 @@ services:
       retries: 20
       start_period: 10s
 
+  # Live dashboard (code in dashboard/): Express serves the React page and pushes
+  # MongoDB's Change Stream to the browser over a WebSocket.
+  # Open http://localhost:3000
+  dashboard:
+    build: ./dashboard
+    environment:
+      # Inside Docker: the replica set's own address works, no directConnection needed.
+      MONGO_URI: mongodb://mongodb:27017/?replicaSet=rs0
+    ports:
+      - "3000:3000"
+    mem_limit: 192m        # memory cap for the whole container
+    restart: unless-stopped # if MongoDB restarts, the Change Stream breaks and the server exits; this brings it back
+    depends_on:
+      mongodb:
+        condition: service_healthy # wait until the replica set has a PRIMARY
+
 volumes:
   kafka-data:
   mongo-data:

@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- Step 7b test page: shows what the server pushes, no charts yet (React comes in 7c). -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Football windows (raw)</title>
+  <style>
+    body { font-family: monospace; margin: 1rem; }
+    table { border-collapse: collapse; }
+    td, th { border: 1px solid #ccc; padding: 2px 8px; text-align: right; }
+  </style>
+</head>
+<body>
+  <p>Status: <b id="status">connecting...</b> | windows: <b id="count">0</b> | updates: <b id="updates">0</b></p>
+  <h3>Latest updates</h3>
+  <table>
+    <thead><tr><th>op</th><th>team</th><th>minute</th><th>pressures</th><th>shots</th><th>xg</th><th>latency ms</th></tr></thead>
+    <tbody id="log"></tbody>
+  </table>
+  <h3>Last message (raw JSON)</h3>
+  <pre id="raw"></pre>
+
+  <script>
+    // Look elements up explicitly: "status" is also an old built-in browser
+    // variable (window.status), so relying on id-globals silently fails.
+    const [status, count, updatesEl, log, raw] =
+      ["status", "count", "updates", "log", "raw"].map(id => document.getElementById(id));
+    const byId = new Map(); // _id -> latest version of that window
+    let updates = 0;
+
+    const socket = new WebSocket(`ws://${location.host}/ws`);
+    socket.onopen = () => status.textContent = "connected";
+    socket.onclose = () => status.textContent = "disconnected (restart the server and reload)";
+
+    socket.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      raw.textContent = JSON.stringify(msg.type === "snapshot" ? { type: "snapshot", windows: msg.windows.length } : msg, null, 2);
+
+      if (msg.type === "snapshot") {
+        msg.windows.forEach(w => byId.set(w._id, w));
+      } else {
+        const w = msg.window;
+        const op = byId.has(w._id) ? "update" : "new";
+        byId.set(w._id, w);
+        updates++;
+        const row = log.insertRow(0);
+        [op, w.team, w.minute, w.pressures, w.shots, w.xg, w.received_at - w.last_sent_at]
+          .forEach(v => row.insertCell().textContent = v);
+        if (log.rows.length > 20) log.deleteRow(-1);
+      }
+      count.textContent = byId.size;
+      updatesEl.textContent = updates;
+    };
+  </script>
+</body>
+</html>

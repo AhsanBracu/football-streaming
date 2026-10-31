@@ -41,7 +41,7 @@ We use \textbf{StatsBomb Open Data} (\url{https://github.com/statsbomb/open-data
 FIFA World Cup 2022 (competition 43, season 106). Each match is a JSON list of timestamped events
 (passes, pressures, shots with expected goals (xG), \dots). We use three group-stage matches: Canada--Morocco 1--2 (3\,388 events),
 England--Iran 6--2 (3\,649) and Croatia--Belgium 0--0 (4\,116), 8.9\,MB in total. The data is not
-included in the zip; \texttt{scripts/download\_statsbomb.py -{}-limit 3} downloads exactly these matches.
+included in the zip file. In \texttt{scripts/download\_statsbomb.py -{}-limit 3} downloads exactly these matches.
 
 \section{Methodology}
 \begin{figure}[!htb]
@@ -52,7 +52,7 @@ included in the zip; \texttt{scripts/download\_statsbomb.py -{}-limit 3} downloa
 \node[box, right=of sb] (hdfs) {HDFS\\(Hadoop 3.3.6)};
 \node[box, right=of hdfs] (prod) {Python replay\\producer};
 \node[box, right=of prod] (kafka) {Kafka 4.1\\(KRaft)};
-\node[box, right=of kafka] (spark) {Spark 3.5\\Streaming};
+\node[box, right=of kafka] (spark) {Spark 3.5\\Struct.\ Streaming};
 \node[box, right=of spark] (mongo) {MongoDB 7\\(replica set)};
 \node[box, right=of mongo] (dash) {Node + React\\dashboard};
 \foreach \a/\b in {sb/hdfs, hdfs/prod, prod/kafka, kafka/spark, spark/mongo, mongo/dash}
@@ -61,13 +61,13 @@ included in the zip; \texttt{scripts/download\_statsbomb.py -{}-limit 3} downloa
 \caption{Pipeline architecture. All components run as Docker containers on one machine.}
 \end{figure}
 
-\textbf{Storage and replay.} The raw files are stored in HDFS. The producer reads matches through
+\textbf{Storage and replay:} The raw files are stored in HDFS. The producer reads matches through
 WebHDFS and sends each event to the Kafka topic \texttt{football-events}, keyed by match id so a
 match stays in order within one partition. It keeps the original gaps between events, divided by a
 \texttt{-{}-speed} factor, and can replay several matches concurrently. Each message carries an \emph{event time} (kickoff + elapsed match time, half-time
 skipped) and the wall-clock send time \texttt{sent\_at} for latency measurement.
 
-\textbf{Stream processing.} A PySpark Structured Streaming job (standalone cluster, one worker with
+\textbf{Stream processing:} A PySpark Structured Streaming job (standalone cluster, one worker with
 2 cores) parses the messages and counts, per match replay and team, shots, shots on target, goals,
 xG, pressures and passes over \textbf{sliding event-time windows} of 5 minutes that advance every
 minute. Because windows are defined on match time, the results are identical at any replay speed. We
@@ -76,11 +76,11 @@ use \emph{update} output mode, so every micro-batch emits only the windows that 
 (\texttt{match|kickoff|team|window\_start}). This upsert is idempotent, so a batch re-run after a
 failure does not double count. Spark's state and Kafka offsets are checkpointed in HDFS.
 
-\textbf{Dashboard.} MongoDB runs as a single-node replica set because Change Streams require the
+\textbf{Dashboard:} MongoDB runs as a single-node replica set because Change Streams require the
 oplog. A Node.js server sends a snapshot of all windows to each browser, then pushes every change
-over a WebSocket; a React client draws one line per team for each statistic (Figure~\ref{fig:dash}).
+over a WebSocket also a React client draws one line per team for each statistic (Figure~\ref{fig:dash}).
 
-\textbf{Evaluation.} (i) \emph{Results:} \texttt{evaluation/match\_summary.py} aggregates the windows
+\textbf{Evaluation:} (i) \emph{Results:} \texttt{evaluation/match\_summary.py} aggregates the windows
 of each match. (ii) \emph{Correctness:} we recomputed every window directly from the raw JSON and
 compared it with Spark's output. (iii) \emph{Latency:} \texttt{evaluation/latency.py} watches the
 Change Stream and records, for every update, the time since the producer sent the newest event in
@@ -96,16 +96,12 @@ $\rightarrow$ consumer). Hardware: Apple-silicon laptop, 8\,GB RAM, 3.8\,GB for 
 \label{fig:dash}
 \end{figure}
 
-\textbf{Football results.} Table~\ref{tab:football} summarizes what the pipeline found.
+\textbf{Football results:} Table~\ref{tab:football} summarizes what the pipeline found.
 \emph{Pressed more} is the share of match minutes in which a team made more pressures than its
 opponent in the 5-minute window. In all three matches \textbf{the team with less of the ball did the
 pressing}: Morocco, Croatia and Iran out-pressed their opponents in 55--66\% of the minutes, while
 Canada, Belgium and England had more passes. \textbf{Creating chances is not the same as winning:}
-Canada (xG 1.10 vs.\ 0.41) and Belgium (2.39 vs.\ 0.68, 16 shots) created more but did not win,
-while England turned an xG of 1.99 into six goals. The time series also show \emph{when} things
-happened (Figure~\ref{fig:dash}): Morocco pressed hardest in minutes 2--7, when they scored first;
-Canada dominated possession from minute 50 to 75 and had their best chance around minute 73
-(xG 0.73), before Morocco's pressing rose again to close out the win.
+Canada (xG 1.10 vs.\ 0.41) and Belgium (2.39 vs.\ 0.68, 16 shots) created more but did not win, while England turned an xG of 1.99 into six goals. The time series also show \emph{when} things happened (Figure~\ref{fig:dash}): Morocco pressed hardest in minutes 2--7, when they scored first while Canada dominated possession from minute 50 to 75 and had their best chance around minute 73 (xG 0.73), before Morocco's pressing rose again to close out the win.
 
 \begin{table}[!htb]
 \centering\small
@@ -126,11 +122,9 @@ Morocco's own goal in Canada's favour is not a Canada shot.}
 \label{tab:football}
 \end{table}
 
-\textbf{Correctness.} For three matches replayed concurrently, all 653 windows matched the batch
-recomputation exactly (0 missing, 0 extra, 0 differing values); two consecutive replays of the same
-match also matched exactly.
+\textbf{Correctness:} For three matches replayed concurrently, all 653 windows matched the batch recomputation exactly (0 missing, 0 extra, 0 differing values) and two consecutive replays of the same match also matched exactly.
 
-\textbf{Latency.} With one match, the median end-to-end latency is about 5\,s regardless of speed
+\textbf{Latency:} With one match, the median end-to-end latency is about 5\,s regardless of speed
 (Table~\ref{tab:latency}): Spark keeps up, and latency is dominated by the fixed cost of a micro-batch
 (scheduling, state checkpoint to HDFS, MongoDB write) rather than by data volume. Slower replays
 give more updates (each window is rewritten in more batches), so the dashboard moves more smoothly.
@@ -152,14 +146,13 @@ Configuration & Updates & Median & p95 & Max \\
 \label{tab:latency}
 \end{table}
 
-\textbf{Lessons learned.} (1) Replaying faster than real time makes event time run ahead of the
-clock, so a new replay started ``behind'' Spark's global watermark and was dropped as late data; a
+\textbf{Lessons learned:} (1) Replaying faster than real time makes event time run ahead of the
+clock, so a new replay started ``behind'' Spark's global watermark and was dropped as late data then a
 2\,h watermark (longer than any match) fixes this without delaying output in update mode.
 (2) Overlapping replays of the same match were merged until the kickoff was added to the window key.
 (3) \texttt{startingOffsets=latest} skips events sent before the first micro-batch.
 (4) Spark's \texttt{current\_timestamp()} is fixed at batch start, so we measure latency at the
-consumer. \emph{Limitations:} one run per configuration on one laptop; more workers and tuning are
-future work.
+consumer. \emph{Limitations:} one run per configuration on one laptop and more workers and tuning are future work.
 
 \section{How to run}
 Requirements: Docker Desktop (about 4\,GB memory), Python 3 with \texttt{pymongo} for the evaluation
